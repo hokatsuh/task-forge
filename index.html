@@ -127,9 +127,12 @@
   .task.done{opacity:.5}
   .grip{color:var(--ink-faint);font-size:18px;line-height:1;flex:none;cursor:grab;user-select:none}
   .t-body{flex:1;min-width:0}
-  .t-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .t-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:text}
+  .t-name:hover{color:var(--accent)}
   .task.done .t-name{text-decoration:line-through}
   .t-sub{font-family:var(--mono);font-size:12px;color:var(--ink-faint);margin-top:3px;display:flex;gap:12px;flex-wrap:wrap}
+  .t-sub .edit-est{cursor:pointer;border-bottom:1px dotted var(--ink-faint)}
+  .t-sub .edit-est:hover{color:var(--accent);border-bottom-color:var(--accent)}
   .t-sub .actual.warn{color:var(--warn)}
   .t-sub .actual.over{color:var(--over)}
   .t-sub .actual.good{color:var(--accent)}
@@ -429,6 +432,26 @@ function changeDue(id,due){
   t.order=maxOrder+1;
   save();render();
 }
+function editName(id){
+  const t=state.tasks.find(x=>x.id===id);
+  if(!t)return;
+  const v=prompt('タスク名を修正:',t.name);
+  if(v===null)return;
+  const name=v.trim();
+  if(!name)return;
+  t.name=name;
+  save();render();
+}
+function editEst(id){
+  const t=state.tasks.find(x=>x.id===id);
+  if(!t)return;
+  const v=prompt('見積もり時間(分)を修正:',t.est);
+  if(v===null)return;
+  const m=parseInt(v);
+  if(isNaN(m)||m<=0)return;
+  t.est=m;
+  save();render();
+}
 function editActual(cid){
   const c=state.completed.find(x=>x.id===cid);if(!c)return;
   const cur=c.actualSec?Math.round(c.actualSec/60):'';
@@ -515,8 +538,8 @@ function taskEl(t){
       <button class="move-btn" title="下へ" onclick="moveTask('${t.id}',1)">▼</button>
     </div>
     <div class="t-body">
-      <div class="t-name">${esc(t.name)}</div>
-      <div class="t-sub"><span>見積 ${t.est}分</span><span>納期 ${fmtDate(t.due)}</span></div>
+      <div class="t-name" title="タップで名前を修正" onclick="editName('${t.id}')">${esc(t.name)}</div>
+      <div class="t-sub"><span class="edit-est" title="タップで見積もりを修正" onclick="editEst('${t.id}')">見積 ${t.est}分</span><span>納期 ${fmtDate(t.due)}</span></div>
     </div>
     ${running
       ? `<button class="start-btn" disabled>計測中</button>`
@@ -787,7 +810,10 @@ async function syncNow(){
 
 /* ===== events ===== */
 document.getElementById('addBtn').addEventListener('click',addTask);
-document.getElementById('taskName').addEventListener('keydown',e=>{if(e.key==='Enter')addTask();});
+document.getElementById('taskName').addEventListener('keydown',e=>{
+  // 日本語変換の確定でEnterを押したときは追加しない(isComposing / keyCode 229 を除外)
+  if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)addTask();
+});
 document.getElementById('exportBtn').addEventListener('click',exportData);
 document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
 document.getElementById('importFile').addEventListener('change',e=>{if(e.target.files[0])importData(e.target.files[0]);e.target.value='';});
