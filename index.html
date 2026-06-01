@@ -178,6 +178,25 @@
 
   .tagline{text-align:center;color:var(--ink-faint);font-size:12px;margin:30px 0 0;font-family:var(--mono)}
 
+  /* ===== 同期エリア ===== */
+  .sync{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px 16px;margin-top:22px;
+  }
+  .sync h2{font-size:13px;letter-spacing:1px;text-transform:uppercase;color:var(--ink-dim);margin-bottom:6px;font-weight:700}
+  .sync-desc{font-size:13px;color:var(--ink-dim);line-height:1.6;margin-bottom:12px}
+  .sync .btns{display:flex;gap:10px;flex-wrap:wrap}
+  .sync-btn{
+    background:var(--accent);color:#1a1d23;border:none;font-weight:700;
+    padding:10px 18px;border-radius:8px;cursor:pointer;font-family:var(--sans);font-size:13px;
+  }
+  .sync-btn:hover{filter:brightness(1.08)}
+  .sync-btn.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--ink);font-weight:500}
+  .sync-btn.ghost:hover{border-color:var(--accent-dim);color:var(--accent);filter:none}
+  .sync-status{font-size:12px;color:var(--ink-faint);font-family:var(--mono);margin-top:8px;min-height:16px}
+  .sync-status.ok{color:var(--accent)}
+  .sync-status.err{color:var(--over)}
+
   /* ===== バックアップバー ===== */
   .backup{
     background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
@@ -225,6 +244,8 @@
     .bk-btn{flex:1;padding:13px 16px;font-size:14px}
   }
 </style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 <body>
 
@@ -267,6 +288,17 @@
     </details>
   </div>
 
+  <div class="sync" id="syncArea">
+    <h2>端末間の同期</h2>
+    <p class="sync-desc" id="syncDesc">Googleにログインすると、パソコンとスマホでタスクが同期します。</p>
+    <div class="btns">
+      <button class="sync-btn" id="signinBtn">Googleでログイン</button>
+      <button class="sync-btn ghost" id="signoutBtn" style="display:none">ログアウト</button>
+      <button class="sync-btn ghost" id="syncNowBtn" style="display:none">今すぐ同期</button>
+    </div>
+    <div class="sync-status" id="syncStatus"></div>
+  </div>
+
   <div class="backup">
     <h2>データの保存</h2>
     <p class="warn-text">⚠ データはこのブラウザの中だけに保存されています。ブラウザの履歴やキャッシュを消すと一緒に消えます。週に一度はバックアップを保存してください。</p>
@@ -303,7 +335,10 @@ function load(){
     }
   });
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}
+  scheduleDriveSave();
+}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 
 function todayStr(){
@@ -609,16 +644,161 @@ function importData(file){
   reader.readAsText(file);
 }
 
+/* ===== Google ドライブ同期 ===== */
+const GOOGLE_CLIENT_ID='691435640585-nrubat9feb8f5499s9m76u00q4kksb3l.apps.googleusercontent.com';
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+const SYNC_FILENAME='taskforge-data.json';
+let tokenClient=null,accessToken=null,driveFileId=null,gapiReady=false,saveTimer=null;
+
+function setSyncStatus(msg,cls){
+  const el=document.getElementById('syncStatus');
+  el.textContent=msg;el.className='sync-status'+(cls?' '+cls:'');
+}
+
+// ライブラリ読み込みを待ってから初期化
+function whenGoogleReady(cb,tries){
+  tries=tries||0;
+  if(window.google&&window.google.accounts&&window.google.accounts.oauth2&&window.gapi){cb();return;}
+  if(tries>40){setSyncStatus('Google接続部品の読み込みに失敗しました(通信環境を確認してください)','err');return;}
+  setTimeout(()=>whenGoogleReady(cb,tries+1),250);
+}
+
+function initGoogle(){
+  whenGoogleReady(()=>{
+    gapi.load('client',async()=>{
+      await gapi.client.init({discoveryDocs:['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']});
+      gapiReady=true;
+    });
+    tokenClient=google.accounts.oauth2.initTokenClient({
+      client_id:GOOGLE_CLIENT_ID,
+      scope:DRIVE_SCOPE,
+      callback:async(resp)=>{
+        if(resp.error){setSyncStatus('ログインに失敗しました','err');return;}
+        accessToken=resp.access_token;
+        gapi.client.setToken({access_token:accessToken});
+        sessionStorage.setItem('tf_token',accessToken);
+        onSignedIn();
+      }
+    });
+    // 直近のトークンがあれば再利用(再読み込み対策)
+    const saved=sessionStorage.getItem('tf_token');
+    if(saved){
+      accessToken=saved;
+      const waitGapi=setInterval(()=>{
+        if(gapiReady){clearInterval(waitGapi);gapi.client.setToken({access_token:accessToken});onSignedIn(true);}
+      },200);
+    }
+  });
+}
+
+function signIn(){
+  if(!tokenClient){setSyncStatus('まだ準備中です。数秒待って再度お試しください','err');return;}
+  tokenClient.requestAccessToken({prompt:accessToken?'':'consent'});
+}
+function signOut(){
+  accessToken=null;driveFileId=null;
+  sessionStorage.removeItem('tf_token');
+  if(window.google&&google.accounts&&google.accounts.oauth2)google.accounts.oauth2.revoke(sessionStorage.getItem('tf_token')||'',()=>{});
+  document.getElementById('signinBtn').style.display='';
+  document.getElementById('signoutBtn').style.display='none';
+  document.getElementById('syncNowBtn').style.display='none';
+  document.getElementById('syncDesc').textContent='Googleにログインすると、パソコンとスマホでタスクが同期します。';
+  setSyncStatus('ログアウトしました');
+}
+
+async function onSignedIn(silent){
+  document.getElementById('signinBtn').style.display='none';
+  document.getElementById('signoutBtn').style.display='';
+  document.getElementById('syncNowBtn').style.display='';
+  document.getElementById('syncDesc').textContent='ログイン中。タスクの変更は自動でGoogleドライブに保存され、他の端末にも反映されます。';
+  setSyncStatus('同期ファイルを確認中…');
+  try{
+    await ensureDriveFile();
+    await pullFromDrive();
+    setSyncStatus('同期済み ('+new Date().toLocaleTimeString('ja-JP')+')','ok');
+  }catch(e){
+    // トークン切れの可能性
+    if(!silent){setSyncStatus('同期に失敗しました。再ログインしてください','err');}
+    else{setSyncStatus('再ログインが必要です','err');}
+  }
+}
+
+// 同期ファイルを探す。なければ作る
+async function ensureDriveFile(){
+  const res=await gapi.client.drive.files.list({
+    q:"name='"+SYNC_FILENAME+"' and trashed=false",
+    spaces:'drive',fields:'files(id,name)'
+  });
+  if(res.result.files&&res.result.files.length>0){
+    driveFileId=res.result.files[0].id;
+  }else{
+    const meta={name:SYNC_FILENAME,mimeType:'application/json'};
+    const createRes=await gapi.client.drive.files.create({resource:meta,fields:'id'});
+    driveFileId=createRes.result.id;
+    await pushToDrive(); // 初回は今のデータを書き込む
+  }
+}
+
+// ドライブから読み込んで画面に反映
+async function pullFromDrive(){
+  if(!driveFileId)return;
+  const res=await gapi.client.drive.files.get({fileId:driveFileId,alt:'media'});
+  let remote=null;
+  try{remote=typeof res.body==='string'&&res.body.trim()?JSON.parse(res.body):null;}catch(e){remote=null;}
+  if(remote&&Array.isArray(remote.tasks)){
+    // ドライブ側を採用(他端末の変更を反映)
+    state={tasks:remote.tasks||[],running:remote.running||null,completed:remote.completed||[]};
+    localStorage.setItem(KEY,JSON.stringify(state));
+    render();
+  }else{
+    // ドライブが空なら今のローカルを書き込む
+    await pushToDrive();
+  }
+}
+
+// 現在のデータをドライブに書き込む
+async function pushToDrive(){
+  if(!driveFileId||!accessToken)return;
+  const body=JSON.stringify(state);
+  await fetch('https://www.googleapis.com/upload/drive/v3/files/'+driveFileId+'?uploadType=media',{
+    method:'PATCH',
+    headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},
+    body
+  });
+}
+
+// 変更のたびに呼ばれる。連続変更をまとめて2秒後に1回書き込む
+function scheduleDriveSave(){
+  if(!accessToken||!driveFileId)return;
+  if(saveTimer)clearTimeout(saveTimer);
+  setSyncStatus('保存待ち…');
+  saveTimer=setTimeout(async()=>{
+    try{await pushToDrive();setSyncStatus('同期済み ('+new Date().toLocaleTimeString('ja-JP')+')','ok');}
+    catch(e){setSyncStatus('保存に失敗しました。再ログインしてください','err');}
+  },2000);
+}
+
+async function syncNow(){
+  if(!accessToken){setSyncStatus('先にログインしてください','err');return;}
+  setSyncStatus('同期中…');
+  try{await pushToDrive();await pullFromDrive();setSyncStatus('同期済み ('+new Date().toLocaleTimeString('ja-JP')+')','ok');}
+  catch(e){setSyncStatus('同期に失敗しました。再ログインしてください','err');}
+}
+
 /* ===== events ===== */
 document.getElementById('addBtn').addEventListener('click',addTask);
 document.getElementById('taskName').addEventListener('keydown',e=>{if(e.key==='Enter')addTask();});
 document.getElementById('exportBtn').addEventListener('click',exportData);
 document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
 document.getElementById('importFile').addEventListener('change',e=>{if(e.target.files[0])importData(e.target.files[0]);e.target.value='';});
+document.getElementById('signinBtn').addEventListener('click',signIn);
+document.getElementById('signoutBtn').addEventListener('click',signOut);
+document.getElementById('syncNowBtn').addEventListener('click',syncNow);
 
 load();
 document.getElementById('taskDue').value=todayStr();
 render();
+initGoogle();
 // ストップウォッチを毎秒更新(タブを閉じても開始時刻ベースなので復帰時も正確)
 setInterval(()=>{if(state.running)renderStopwatch();},1000);
 </script>
