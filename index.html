@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Task Forge">
+<meta name="theme-color" content="#1a1d23">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Task Forge — 見積もり鍛錬</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap');
+
+  :root{
+    --bg:#1a1d23;
+    --panel:#22262e;
+    --panel2:#2a2f38;
+    --line:#363c47;
+    --ink:#e8eaed;
+    --ink-dim:#9aa1ad;
+    --ink-faint:#646b78;
+    --accent:#7dd3a8;      /* 落ち着いた緑 */
+    --accent-dim:#3f6a55;
+    --warn:#e0a85e;        /* 見積もり超過 */
+    --over:#d9756b;        /* 大幅超過 */
+    --today:#7da9d3;
+    --radius:10px;
+    --mono:'Space Mono',monospace;
+    --sans:'Zen Kaku Gothic New',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:15px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ===== ストップウォッチ・ヘッダー(常時表示) ===== */
+  .stopwatch{
+    position:sticky;top:0;z-index:50;
+    background:linear-gradient(180deg,#1f232a,#1a1d23);
+    border-bottom:1px solid var(--line);
+    padding:14px 20px;
+    padding-top:max(14px,env(safe-area-inset-top));
+    display:flex;align-items:center;gap:18px;
+    min-height:64px;
+  }
+  .sw-idle{color:var(--ink-faint);font-size:14px}
+  .sw-active{display:flex;align-items:center;gap:18px;width:100%}
+  .sw-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent);animation:pulse 1.6s ease-in-out infinite;flex:none}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+  .sw-name{font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sw-time{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:1px;font-variant-numeric:tabular-nums}
+  .sw-est{font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
+  .sw-est.warn{color:var(--warn)}
+  .sw-est.over{color:var(--over)}
+  .sw-stop{
+    background:var(--over);color:#1a1d23;border:none;font-family:var(--sans);font-weight:700;
+    padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;flex:none;
+  }
+  .sw-stop:hover{filter:brightness(1.08)}
+
+  .wrap{max-width:840px;margin:0 auto;padding:22px 20px 80px}
+
+  /* ===== 投げ込み欄 ===== */
+  .inbox{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px;margin-bottom:22px;
+  }
+  .inbox-row{display:flex;gap:10px;flex-wrap:wrap}
+  .inbox input[type=text]{
+    flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line);
+    color:var(--ink);padding:11px 13px;border-radius:8px;font-family:var(--sans);font-size:15px;
+  }
+  .inbox input[type=text]:focus{outline:none;border-color:var(--accent-dim)}
+  .inbox input[type=number]{
+    width:74px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:11px 10px;border-radius:8px;font-family:var(--mono);font-size:14px;text-align:center;
+  }
+  .inbox select{
+    background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:11px 10px;border-radius:8px;font-family:var(--sans);font-size:14px;cursor:pointer;
+  }
+  .inbox input[type=date]{
+    background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:10px 10px;border-radius:8px;font-family:var(--mono);font-size:14px;cursor:pointer;
+  }
+  .inbox input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.7);cursor:pointer}
+  .inbox input:focus,.inbox select:focus{outline:none;border-color:var(--accent-dim)}
+  .add-btn{
+    background:var(--accent);color:#1a1d23;border:none;font-weight:700;font-family:var(--sans);
+    padding:11px 22px;border-radius:8px;cursor:pointer;font-size:15px;
+  }
+  .add-btn:hover{filter:brightness(1.08)}
+  .field-label{font-size:11px;color:var(--ink-faint);margin:14px 0 4px;letter-spacing:.5px}
+  .inbox-meta{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+  .meta-cell{display:flex;flex-direction:column}
+
+  /* ===== グループ ===== */
+  .group{margin-bottom:8px}
+  .group-head{
+    display:flex;align-items:center;gap:10px;padding:16px 4px 8px;
+    font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--ink-dim);
+  }
+  .group-head .bar{width:3px;height:15px;border-radius:2px;background:var(--ink-faint)}
+  .group-head.today .bar{background:var(--today)}
+  .group-head.overdue .bar{background:var(--over)}
+  .group-head.overdue{color:var(--over)}
+  .group-head .count{font-family:var(--mono);font-weight:400;color:var(--ink-faint);font-size:12px}
+  .group-head .sum{margin-left:auto;font-family:var(--mono);font-weight:400;color:var(--ink-faint);font-size:12px;text-transform:none;letter-spacing:0}
+
+  /* ===== タスクカード ===== */
+  .task{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;
+    cursor:grab;transition:border-color .15s,transform .06s;
+  }
+  .task:active{cursor:grabbing}
+  .task.dragging{opacity:.4;border-color:var(--accent-dim)}
+  .task.drag-over{border-top:2px solid var(--accent)}
+  .task.running{border-color:var(--accent-dim);background:linear-gradient(90deg,rgba(125,211,168,.07),var(--panel))}
+  .task.done{opacity:.5}
+  .grip{color:var(--ink-faint);font-size:18px;line-height:1;flex:none;cursor:grab;user-select:none}
+  .t-body{flex:1;min-width:0}
+  .t-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .task.done .t-name{text-decoration:line-through}
+  .t-sub{font-family:var(--mono);font-size:12px;color:var(--ink-faint);margin-top:3px;display:flex;gap:12px;flex-wrap:wrap}
+  .t-sub .actual.warn{color:var(--warn)}
+  .t-sub .actual.over{color:var(--over)}
+  .t-sub .actual.good{color:var(--accent)}
+  .t-sub .edit-actual{color:var(--today);cursor:pointer;border-bottom:1px dotted var(--today)}
+  .start-btn{
+    background:transparent;border:1px solid var(--accent-dim);color:var(--accent);
+    padding:8px 16px;border-radius:7px;cursor:pointer;font-family:var(--sans);font-weight:500;font-size:13px;flex:none;
+  }
+  .start-btn:hover{background:var(--accent-dim);color:var(--ink)}
+  .start-btn:disabled{opacity:.3;cursor:not-allowed}
+  .done-btn{
+    background:transparent;border:1px solid var(--line);color:var(--ink-faint);
+    width:30px;height:30px;border-radius:7px;cursor:pointer;font-size:14px;flex:none;
+  }
+  .done-btn:hover{border-color:var(--accent-dim);color:var(--accent)}
+  .del-btn{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:16px;flex:none;padding:4px}
+  .del-btn:hover{color:var(--over)}
+  .due-select{
+    background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim);
+    padding:6px 6px;border-radius:7px;font-family:var(--mono);font-size:12px;cursor:pointer;flex:none;
+  }
+  .due-select:focus{outline:none;border-color:var(--accent-dim)}
+  .due-select::-webkit-calendar-picker-indicator{filter:invert(.6);cursor:pointer}
+
+  .empty{text-align:center;color:var(--ink-faint);padding:40px 0;font-size:14px}
+
+  /* ===== 見積もり精度パネル ===== */
+  .accuracy{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;margin-top:26px;
+  }
+  .accuracy h2{font-size:13px;letter-spacing:1px;text-transform:uppercase;color:var(--ink-dim);margin-bottom:14px;font-weight:700}
+  .acc-stats{display:flex;gap:26px;flex-wrap:wrap}
+  .acc-stat{display:flex;flex-direction:column}
+  .acc-stat .num{font-family:var(--mono);font-size:26px;font-weight:700}
+  .acc-stat .lbl{font-size:11px;color:var(--ink-faint);margin-top:2px}
+  .acc-note{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-dim);line-height:1.6}
+  .acc-note b{color:var(--accent);font-family:var(--mono)}
+
+  .completed-list{margin-top:14px}
+  .completed-list summary{cursor:pointer;color:var(--ink-faint);font-size:12px;letter-spacing:.5px}
+  .ci{display:flex;gap:12px;padding:7px 0;border-bottom:1px solid var(--panel2);font-size:13px;align-items:center}
+  .ci .cn{flex:1;color:var(--ink-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ci .cm{font-family:var(--mono);font-size:12px}
+  .ci .cm.warn{color:var(--warn)}.ci .cm.over{color:var(--over)}.ci .cm.good{color:var(--accent)}
+
+  .tagline{text-align:center;color:var(--ink-faint);font-size:12px;margin:30px 0 0;font-family:var(--mono)}
+
+  /* ===== バックアップバー ===== */
+  .backup{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px 16px;margin-top:22px;
+  }
+  .backup h2{font-size:13px;letter-spacing:1px;text-transform:uppercase;color:var(--ink-dim);margin-bottom:6px;font-weight:700}
+  .backup .warn-text{font-size:12px;color:var(--warn);line-height:1.6;margin-bottom:12px}
+  .backup .btns{display:flex;gap:10px;flex-wrap:wrap}
+  .bk-btn{
+    background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:9px 16px;border-radius:8px;cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:500;
+  }
+  .bk-btn:hover{border-color:var(--accent-dim);color:var(--accent)}
+  .bk-status{font-size:12px;color:var(--ink-faint);font-family:var(--mono);margin-top:8px}
+
+  /* ===== 上下移動ボタン(スマホ用並べ替え) ===== */
+  .move-btns{display:none;flex-direction:column;gap:2px;flex:none}
+  .move-btn{
+    background:var(--panel2);border:1px solid var(--line);color:var(--ink-dim);
+    width:30px;height:22px;border-radius:6px;cursor:pointer;font-size:11px;line-height:1;padding:0;
+  }
+  .move-btn:hover{border-color:var(--accent-dim);color:var(--accent)}
+  .move-btn:disabled{opacity:.25;cursor:not-allowed}
+
+  /* ===== スマホ対応 ===== */
+  @media (max-width:640px){
+    body{font-size:16px}
+    .wrap{padding:16px 12px 70px}
+    .stopwatch{padding:12px 14px;gap:10px;flex-wrap:wrap;min-height:auto}
+    .sw-time{font-size:26px}
+    .sw-est{width:100%;order:3}
+    .inbox-row input[type=text]{min-width:100%;font-size:16px}
+    .add-btn{flex:1;padding:13px 22px}
+    .inbox input[type=number],.inbox input[type=date]{font-size:16px;padding:13px 10px}
+    /* スマホではドラッグのグリップを隠し、上下ボタンを出す */
+    .grip{display:none}
+    .move-btns{display:flex}
+    .task{gap:9px;padding:13px 12px;flex-wrap:wrap}
+    .start-btn{padding:11px 18px;font-size:14px}
+    .done-btn{width:38px;height:38px;font-size:16px}
+    .del-btn{font-size:18px;padding:6px}
+    .due-select{font-size:14px;padding:9px 6px}
+    .t-name{white-space:normal}
+    .acc-stats{gap:18px}
+    .bk-btn{flex:1;padding:13px 16px;font-size:14px}
+  }
+</style>
+</head>
+<body>
+
+<div class="stopwatch" id="stopwatch">
+  <span class="sw-idle">タスクを開始すると、ここに経過時間が表示されます</span>
+</div>
+
+<div class="wrap">
+
+  <div class="inbox">
+    <div class="inbox-row">
+      <input type="text" id="taskName" placeholder="発生したタスクをここに投げ込む…" autocomplete="off">
+      <button class="add-btn" id="addBtn">追加</button>
+    </div>
+    <div class="inbox-meta">
+      <div class="meta-cell">
+        <span class="field-label">見積もり(分)</span>
+        <input type="number" id="taskEst" min="1" value="15">
+      </div>
+      <div class="meta-cell">
+        <span class="field-label">納期</span>
+        <input type="date" id="taskDue">
+      </div>
+    </div>
+  </div>
+
+  <div id="groups"></div>
+
+  <div class="accuracy">
+    <h2>見積もり精度</h2>
+    <div class="acc-stats">
+      <div class="acc-stat"><span class="num" id="statCount">0</span><span class="lbl">完了タスク数</span></div>
+      <div class="acc-stat"><span class="num" id="statRatio">—</span><span class="lbl">平均 実績÷見積もり</span></div>
+      <div class="acc-stat"><span class="num" id="statSign">—</span><span class="lbl">傾向</span></div>
+    </div>
+    <div class="acc-note" id="accNote">完了タスクが溜まると、あなたの見積もりのクセがここに数字で出ます。</div>
+    <details class="completed-list">
+      <summary>完了したタスクの記録</summary>
+      <div id="completedList"></div>
+    </details>
+  </div>
+
+  <div class="backup">
+    <h2>データの保存</h2>
+    <p class="warn-text">⚠ データはこのブラウザの中だけに保存されています。ブラウザの履歴やキャッシュを消すと一緒に消えます。週に一度はバックアップを保存してください。</p>
+    <div class="btns">
+      <button class="bk-btn" id="exportBtn">バックアップを保存</button>
+      <button class="bk-btn" id="importBtn">バックアップから復元</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none">
+    </div>
+    <div class="bk-status" id="bkStatus"></div>
+  </div>
+
+  <p class="tagline">上から順にこなせば、仕事は終わる。</p>
+</div>
+
+<script>
+const KEY='taskforge_v1';
+let state={tasks:[],running:null,completed:[]};
+// task: {id,name,est(分),due(YYYY-MM-DD),order}
+// running: {id,startedAt(ms)}
+// completed: {id,name,est,actualSec,doneAt}
+
+function load(){
+  try{const r=localStorage.getItem(KEY);if(r)state=JSON.parse(r);}catch(e){}
+  // 旧形式(today/tomorrow/week/later)を日付に変換
+  const map=()=>{const d=new Date();return d;};
+  (state.tasks||[]).forEach(t=>{
+    if(t.due==='today'||t.due==='tomorrow'||t.due==='week'||t.due==='later'){
+      const d=new Date();
+      if(t.due==='tomorrow')d.setDate(d.getDate()+1);
+      else if(t.due==='week')d.setDate(d.getDate()+3);
+      else if(t.due==='later')d.setDate(d.getDate()+14);
+      const p=n=>String(n).padStart(2,'0');
+      t.due=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+    }
+  });
+}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+
+function todayStr(){
+  const d=new Date();const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+// 日付文字列から、振り分けグループのキーと表示順を返す
+function bucketOf(dueStr){
+  if(!dueStr)return {key:'none',rank:5,label:'納期なし',cls:''};
+  const today=new Date();today.setHours(0,0,0,0);
+  const due=new Date(dueStr+'T00:00:00');
+  const diff=Math.round((due-today)/86400000);
+  if(diff<0)return {key:'over',rank:0,label:'期限切れ',cls:'overdue'};
+  if(diff===0)return {key:'today',rank:1,label:'今日',cls:'today'};
+  if(diff===1)return {key:'tomorrow',rank:2,label:'明日',cls:''};
+  if(diff<=7)return {key:'week',rank:3,label:'今週',cls:''};
+  return {key:'later',rank:4,label:'それ以降',cls:''};
+}
+function fmtDate(dueStr){
+  if(!dueStr)return '納期なし';
+  const d=new Date(dueStr+'T00:00:00');
+  const w=['日','月','火','水','木','金','土'][d.getDay()];
+  return `${d.getMonth()+1}/${d.getDate()}(${w})`;
+}
+
+function fmtClock(sec){
+  const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
+  const p=n=>String(n).padStart(2,'0');
+  return h>0?`${h}:${p(m)}:${p(s)}`:`${p(m)}:${p(s)}`;
+}
+function fmtMin(sec){const m=Math.round(sec/60);return m<60?m+'分':Math.floor(m/60)+'時間'+(m%60?(m%60)+'分':'');}
+
+/* ===== 追加 ===== */
+function addTask(){
+  const name=document.getElementById('taskName').value.trim();
+  const est=parseInt(document.getElementById('taskEst').value)||15;
+  const due=document.getElementById('taskDue').value||todayStr();
+  if(!name)return;
+  const maxOrder=state.tasks.length?Math.max(...state.tasks.map(t=>t.order)):0;
+  state.tasks.push({id:uid(),name,est,due,order:maxOrder+1});
+  document.getElementById('taskName').value='';
+  document.getElementById('taskEst').value=15;
+  document.getElementById('taskDue').value=todayStr();
+  save();render();
+  document.getElementById('taskName').focus();
+}
+
+/* ===== 計測 ===== */
+function startTask(id){
+  if(state.running){ // 別タスク実行中なら確認の上、現タスクを終了
+    if(!confirm('別のタスクを計測中です。それを完了して新しいタスクを開始しますか?'))return;
+    finishTask(state.running.id,true);
+  }
+  state.running={id,startedAt:Date.now()};
+  save();render();
+}
+function finishTask(id,silent){
+  if(!state.running||state.running.id!==id)return;
+  const elapsed=Math.max(1,Math.round((Date.now()-state.running.startedAt)/1000));
+  const t=state.tasks.find(x=>x.id===id);
+  if(t){
+    state.completed.unshift({id:t.id,name:t.name,est:t.est,actualSec:elapsed,doneAt:Date.now()});
+    state.tasks=state.tasks.filter(x=>x.id!==id);
+  }
+  state.running=null;
+  save();render();
+}
+function doneNoTimer(id){
+  // 計測せず完了(実績は見積もり扱いにせず、記録から除外=精度に影響させない)
+  const t=state.tasks.find(x=>x.id===id);
+  if(!t)return;
+  if(!confirm('「'+t.name+'」を計測なしで完了にしますか?(見積もり精度には反映されません)'))return;
+  state.completed.unshift({id:t.id,name:t.name,est:t.est,actualSec:null,doneAt:Date.now()});
+  state.tasks=state.tasks.filter(x=>x.id!==id);
+  save();render();
+}
+function delTask(id){
+  if(state.running&&state.running.id===id)state.running=null;
+  state.tasks=state.tasks.filter(x=>x.id!==id);
+  save();render();
+}
+function changeDue(id,due){
+  const t=state.tasks.find(x=>x.id===id);
+  if(!t)return;
+  t.due=due;
+  // 移動先グループの末尾に置く(実行順は維持しつつグループ移動を自然に)
+  const maxOrder=state.tasks.length?Math.max(...state.tasks.map(x=>x.order)):0;
+  t.order=maxOrder+1;
+  save();render();
+}
+function editActual(cid){
+  const c=state.completed.find(x=>x.id===cid);if(!c)return;
+  const cur=c.actualSec?Math.round(c.actualSec/60):'';
+  const v=prompt('実際にかかった時間(分)を入力:',cur);
+  if(v===null)return;
+  const m=parseFloat(v);
+  if(isNaN(m)||m<=0)return;
+  c.actualSec=Math.round(m*60);
+  save();render();
+}
+
+/* ===== ストップウォッチ描画 ===== */
+function ratioCls(sec,est){
+  const r=sec/(est*60);
+  if(r<=1.0)return 'good';
+  if(r<=1.5)return 'warn';
+  return 'over';
+}
+function renderStopwatch(){
+  const el=document.getElementById('stopwatch');
+  if(!state.running){
+    el.innerHTML='<span class="sw-idle">タスクを開始すると、ここに経過時間が表示されます</span>';
+    return;
+  }
+  const t=state.tasks.find(x=>x.id===state.running.id);
+  if(!t){state.running=null;save();el.innerHTML='<span class="sw-idle">タスクを開始すると、ここに経過時間が表示されます</span>';return;}
+  const sec=Math.max(0,Math.round((Date.now()-state.running.startedAt)/1000));
+  const cls=ratioCls(sec,t.est);
+  el.innerHTML=`
+    <div class="sw-active">
+      <span class="sw-dot"></span>
+      <span class="sw-name">${esc(t.name)}</span>
+      <span class="sw-est ${cls}">見積 ${t.est}分</span>
+      <span class="sw-time ${cls}" style="${cls==='over'?'color:var(--over)':cls==='warn'?'color:var(--warn)':''}">${fmtClock(sec)}</span>
+      <button class="sw-stop" onclick="finishTask('${t.id}')">完了</button>
+    </div>`;
+}
+
+function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* ===== リスト描画 ===== */
+function render(){
+  renderStopwatch();
+  const groupsEl=document.getElementById('groups');
+  groupsEl.innerHTML='';
+  const sorted=[...state.tasks].sort((a,b)=>a.order-b.order);
+
+  if(sorted.length===0){
+    groupsEl.innerHTML='<div class="empty">タスクはありません。上の欄から投げ込んでください。</div>';
+  }else{
+    // バケットごとにまとめる
+    const buckets={};
+    sorted.forEach(t=>{
+      const b=bucketOf(t.due);
+      if(!buckets[b.key])buckets[b.key]={meta:b,items:[]};
+      buckets[b.key].items.push(t);
+    });
+    Object.values(buckets).sort((a,b)=>a.meta.rank-b.meta.rank).forEach(({meta,items})=>{
+      const sumMin=items.reduce((s,t)=>s+t.est,0);
+      const g=document.createElement('div');
+      g.className='group';
+      g.innerHTML=`<div class="group-head ${meta.cls}">
+        <span class="bar"></span>${meta.label}
+        <span class="count">${items.length}件</span>
+        <span class="sum">見積もり計 ${sumMin}分</span>
+      </div>`;
+      items.forEach(t=>g.appendChild(taskEl(t)));
+      groupsEl.appendChild(g);
+    });
+  }
+  renderAccuracy();
+}
+
+function taskEl(t){
+  const running=state.running&&state.running.id===t.id;
+  const d=document.createElement('div');
+  d.className='task'+(running?' running':'');
+  d.draggable=true;
+  d.dataset.id=t.id;
+  d.innerHTML=`
+    <span class="grip">⠿</span>
+    <div class="move-btns">
+      <button class="move-btn" title="上へ" onclick="moveTask('${t.id}',-1)">▲</button>
+      <button class="move-btn" title="下へ" onclick="moveTask('${t.id}',1)">▼</button>
+    </div>
+    <div class="t-body">
+      <div class="t-name">${esc(t.name)}</div>
+      <div class="t-sub"><span>見積 ${t.est}分</span><span>納期 ${fmtDate(t.due)}</span></div>
+    </div>
+    ${running
+      ? `<button class="start-btn" disabled>計測中</button>`
+      : `<button class="start-btn" onclick="startTask('${t.id}')">開始</button>`}
+    <input type="date" class="due-select" title="納期を変更" value="${t.due}" onchange="changeDue('${t.id}',this.value)">
+    <button class="done-btn" title="計測なしで完了" onclick="doneNoTimer('${t.id}')">✓</button>
+    <button class="del-btn" title="削除" onclick="delTask('${t.id}')">✕</button>`;
+  addDnd(d);
+  return d;
+}
+
+/* ===== ドラッグ&ドロップ並べ替え ===== */
+let dragId=null;
+function addDnd(el){
+  el.addEventListener('dragstart',e=>{dragId=el.dataset.id;el.classList.add('dragging');e.dataTransfer.effectAllowed='move';});
+  el.addEventListener('dragend',()=>{el.classList.remove('dragging');document.querySelectorAll('.task').forEach(t=>t.classList.remove('drag-over'));});
+  el.addEventListener('dragover',e=>{e.preventDefault();el.classList.add('drag-over');});
+  el.addEventListener('dragleave',()=>el.classList.remove('drag-over'));
+  el.addEventListener('drop',e=>{
+    e.preventDefault();el.classList.remove('drag-over');
+    const targetId=el.dataset.id;
+    if(!dragId||dragId===targetId)return;
+    reorder(dragId,targetId);
+  });
+}
+function reorder(fromId,toId){
+  const sorted=[...state.tasks].sort((a,b)=>a.order-b.order);
+  const from=sorted.findIndex(t=>t.id===fromId);
+  const to=sorted.findIndex(t=>t.id===toId);
+  if(from<0||to<0)return;
+  const [moved]=sorted.splice(from,1);
+  sorted.splice(to,0,moved);
+  sorted.forEach((t,i)=>{t.order=i+1;});
+  state.tasks=sorted;
+  save();render();
+}
+// 上下ボタン:同じ納期グループ内で隣のタスクと順番を入れ替える
+function moveTask(id,dir){
+  const me=state.tasks.find(t=>t.id===id);
+  if(!me)return;
+  const myBucket=bucketOf(me.due).key;
+  // 同じグループのタスクを表示順に取り出す
+  const group=[...state.tasks]
+    .filter(t=>bucketOf(t.due).key===myBucket)
+    .sort((a,b)=>a.order-b.order);
+  const idx=group.findIndex(t=>t.id===id);
+  const swapWith=group[idx+dir];
+  if(!swapWith)return; // 端なら何もしない
+  const tmp=me.order;me.order=swapWith.order;swapWith.order=tmp;
+  save();render();
+}
+
+/* ===== 精度パネル ===== */
+function renderAccuracy(){
+  const timed=state.completed.filter(c=>c.actualSec);
+  document.getElementById('statCount').textContent=state.completed.length;
+  const note=document.getElementById('accNote');
+
+  if(timed.length===0){
+    document.getElementById('statRatio').textContent='—';
+    document.getElementById('statSign').textContent='—';
+    note.innerHTML='計測ありで完了したタスクが溜まると、あなたの見積もりのクセがここに数字で出ます。';
+  }else{
+    const ratios=timed.map(c=>(c.actualSec/60)/c.est);
+    const avg=ratios.reduce((a,b)=>a+b,0)/ratios.length;
+    document.getElementById('statRatio').textContent=avg.toFixed(2)+'倍';
+    let sign,col;
+    if(avg<=1.05){sign='ほぼ正確';col='var(--accent)';}
+    else if(avg<=1.3){sign='やや甘い';col='var(--warn)';}
+    else{sign='甘い';col='var(--over)';}
+    const sEl=document.getElementById('statSign');
+    sEl.textContent=sign;sEl.style.color=col;
+    document.getElementById('statRatio').style.color=col;
+    if(avg>1.1){
+      note.innerHTML=`あなたは見積もりの <b>${avg.toFixed(2)}倍</b> の時間を使う傾向があります。次から見積もりを <b>${avg.toFixed(1)}倍</b> して入力すると、勤務時間の読みが当たります。`;
+    }else{
+      note.innerHTML=`見積もりはほぼ正確です(平均 <b>${avg.toFixed(2)}倍</b>)。この調子で。`;
+    }
+  }
+
+  const cl=document.getElementById('completedList');
+  cl.innerHTML='';
+  if(state.completed.length===0){cl.innerHTML='<div class="ci"><span class="cn">まだ完了タスクはありません</span></div>';return;}
+  state.completed.slice(0,30).forEach(c=>{
+    const ci=document.createElement('div');ci.className='ci';
+    let metric;
+    if(c.actualSec){
+      const cls=ratioCls(c.actualSec,c.est);
+      metric=`<span class="cm ${cls}">${Math.round(c.actualSec/60)}分 / 見積${c.est}分</span>`;
+    }else{
+      metric=`<span class="cm" style="color:var(--ink-faint)">計測なし / 見積${c.est}分</span>`;
+    }
+    ci.innerHTML=`<span class="cn">${esc(c.name)}</span>${metric}<span class="edit-actual" style="font-size:12px;color:var(--today);cursor:pointer;border-bottom:1px dotted" onclick="editActual('${c.id}')">修正</span>`;
+    cl.appendChild(ci);
+  });
+}
+
+/* ===== バックアップ / 復元 ===== */
+function exportData(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const d=new Date();
+  const p=n=>String(n).padStart(2,'0');
+  a.href=url;
+  a.download=`taskforge_backup_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('bkStatus').textContent='バックアップを保存しました ('+d.toLocaleString('ja-JP')+')';
+}
+function importData(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(!data||!Array.isArray(data.tasks))throw new Error('形式エラー');
+      if(!confirm('現在のデータをこのバックアップで上書きします。よろしいですか?'))return;
+      state={tasks:data.tasks||[],running:data.running||null,completed:data.completed||[]};
+      save();render();
+      document.getElementById('bkStatus').textContent='バックアップから復元しました';
+    }catch(err){
+      document.getElementById('bkStatus').textContent='復元に失敗しました(ファイル形式が不正です)';
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ===== events ===== */
+document.getElementById('addBtn').addEventListener('click',addTask);
+document.getElementById('taskName').addEventListener('keydown',e=>{if(e.key==='Enter')addTask();});
+document.getElementById('exportBtn').addEventListener('click',exportData);
+document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
+document.getElementById('importFile').addEventListener('change',e=>{if(e.target.files[0])importData(e.target.files[0]);e.target.value='';});
+
+load();
+document.getElementById('taskDue').value=todayStr();
+render();
+// ストップウォッチを毎秒更新(タブを閉じても開始時刻ベースなので復帰時も正確)
+setInterval(()=>{if(state.running)renderStopwatch();},1000);
+</script>
+</body>
+</html>
