@@ -53,12 +53,20 @@
   .sw-idle{color:var(--ink-faint);font-size:14px}
   .sw-active{display:flex;align-items:center;gap:18px;width:100%}
   .sw-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent);animation:pulse 1.6s ease-in-out infinite;flex:none}
+  .sw-dot.paused{background:var(--warn);box-shadow:none;animation:none}
   @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+  .paused-tag{font-family:var(--mono);font-size:11px;color:var(--warn);margin-left:8px;font-weight:400}
   .sw-name{font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sw-time{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:1px;font-variant-numeric:tabular-nums}
   .sw-est{font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
   .sw-est.warn{color:var(--warn)}
   .sw-est.over{color:var(--over)}
+  .sw-pause,.sw-resume{
+    background:var(--panel2);color:var(--ink);border:1px solid var(--line);font-family:var(--sans);font-weight:500;
+    padding:10px 16px;border-radius:8px;cursor:pointer;font-size:14px;flex:none;
+  }
+  .sw-pause:hover,.sw-resume:hover{border-color:var(--accent-dim);color:var(--accent)}
+  .sw-resume{background:var(--accent-dim);border-color:var(--accent-dim);color:var(--ink);font-weight:700}
   .sw-stop{
     background:var(--over);color:#1a1d23;border:none;font-family:var(--sans);font-weight:700;
     padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;flex:none;
@@ -337,6 +345,10 @@ function load(){
       t.due=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
     }
   });
+  // 旧形式のrunning(startedAt持ち)を新形式(baseSec/segStart)に変換
+  if(state.running&&state.running.startedAt&&state.running.segStart===undefined){
+    state.running={id:state.running.id,baseSec:0,segStart:state.running.startedAt};
+  }
 }
 function save(){
   try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}
@@ -390,17 +402,37 @@ function addTask(){
 }
 
 /* ===== 計測 ===== */
+// running: {id, baseSec(これまで積上げ秒), segStart(現区間の開始ms / 一時停止中はnull)}
+function elapsedSec(){
+  if(!state.running)return 0;
+  let s=state.running.baseSec||0;
+  if(state.running.segStart)s+=Math.round((Date.now()-state.running.segStart)/1000);
+  return Math.max(0,s);
+}
+function isPaused(){return state.running&&!state.running.segStart;}
+
 function startTask(id){
   if(state.running){ // 別タスク実行中なら確認の上、現タスクを終了
     if(!confirm('別のタスクを計測中です。それを完了して新しいタスクを開始しますか?'))return;
     finishTask(state.running.id,true);
   }
-  state.running={id,startedAt:Date.now()};
+  state.running={id,baseSec:0,segStart:Date.now()};
+  save();render();
+}
+function pauseTask(){
+  if(!state.running||!state.running.segStart)return;
+  state.running.baseSec=elapsedSec(); // 現区間までを積み上げて確定
+  state.running.segStart=null;        // 時計を止める
+  save();render();
+}
+function resumeTask(){
+  if(!state.running||state.running.segStart)return;
+  state.running.segStart=Date.now();  // 続きから再開
   save();render();
 }
 function finishTask(id,silent){
   if(!state.running||state.running.id!==id)return;
-  const elapsed=Math.max(1,Math.round((Date.now()-state.running.startedAt)/1000));
+  const elapsed=Math.max(1,elapsedSec());
   const t=state.tasks.find(x=>x.id===id);
   if(t){
     state.completed.unshift({id:t.id,name:t.name,est:t.est,actualSec:elapsed,doneAt:Date.now()});
@@ -478,14 +510,19 @@ function renderStopwatch(){
   }
   const t=state.tasks.find(x=>x.id===state.running.id);
   if(!t){state.running=null;save();el.innerHTML='<span class="sw-idle">タスクを開始すると、ここに経過時間が表示されます</span>';return;}
-  const sec=Math.max(0,Math.round((Date.now()-state.running.startedAt)/1000));
+  const sec=elapsedSec();
+  const paused=isPaused();
   const cls=ratioCls(sec,t.est);
+  const timeColor=cls==='over'?'color:var(--over)':cls==='warn'?'color:var(--warn)':'';
   el.innerHTML=`
-    <div class="sw-active">
-      <span class="sw-dot"></span>
-      <span class="sw-name">${esc(t.name)}</span>
+    <div class="sw-active${paused?' paused':''}">
+      <span class="sw-dot${paused?' paused':''}"></span>
+      <span class="sw-name">${esc(t.name)}${paused?' <span class="paused-tag">一時停止中</span>':''}</span>
       <span class="sw-est ${cls}">見積 ${t.est}分</span>
-      <span class="sw-time ${cls}" style="${cls==='over'?'color:var(--over)':cls==='warn'?'color:var(--warn)':''}">${fmtClock(sec)}</span>
+      <span class="sw-time ${cls}" style="${paused?'opacity:.55':timeColor}">${fmtClock(sec)}</span>
+      ${paused
+        ? `<button class="sw-resume" onclick="resumeTask()">再開</button>`
+        : `<button class="sw-pause" onclick="pauseTask()">一時停止</button>`}
       <button class="sw-stop" onclick="finishTask('${t.id}')">完了</button>
     </div>`;
 }
@@ -826,7 +863,7 @@ document.getElementById('taskDue').value=todayStr();
 render();
 initGoogle();
 // ストップウォッチを毎秒更新(タブを閉じても開始時刻ベースなので復帰時も正確)
-setInterval(()=>{if(state.running)renderStopwatch();},1000);
+setInterval(()=>{if(state.running&&!isPaused())renderStopwatch();},1000);
 </script>
 </body>
 </html>
